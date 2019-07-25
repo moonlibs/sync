@@ -19,7 +19,7 @@ do
 
 	function cv:finish()
 		self.count = self.count - 1
-		if self.count == 0 then
+		if self.count <= 0 then
 			if self.channel then
 				self.channel:put(true,0)
 			elseif self.count < 0 then
