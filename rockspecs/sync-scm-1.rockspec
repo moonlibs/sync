@@ -1,7 +1,7 @@
 package = 'sync'
 version = 'scm-1'
 source  = {
-	url    = 'git://github.com/moonlibs/sync.git',
+	url    = 'git+https://github.com/moonlibs/sync.git',
 	branch = 'master',
 }
 description = {
