@@ -16,6 +16,10 @@ build = {
 	type = 'builtin',
 	modules = {
 		['sync'] = 'sync.lua';
+		['sync.cond'] = 'sync/cond.lua';
+		['sync.wg'] = 'sync/wg.lua';
+		['sync.lock'] = 'sync/lock.lua';
+		['sync.latch'] = 'sync/latch.lua';
 	}
 }
 
