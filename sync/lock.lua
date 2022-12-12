@@ -15,7 +15,7 @@ local FIBER_STORE = 'sync.lock'
 --     return _G.print(fiber.id(), ...)
 -- end
 
-function lock.new(name, timeout)
+function lock.new(name)
 	if name == lock then error("Usage: lock.new([name]) or lock([name]) (not lock:new())", 2) end
 	return setmetatable({
 		name    = name;

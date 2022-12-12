@@ -3,7 +3,7 @@ local fiber = require "fiber"
 local cond = {}
 cond.__index = cond
 cond.__tostring = function (self) return "cond<".. (self.name or 'anon') ..">" end
-setmetatable(cond, { __call = function (_, name) return _.new(name) end })
+setmetatable(cond, { __call = function (_, ...) return _.new(...) end })
 
 function cond.new(name, timeout)
 	if name == cond then error("Usage: cond.new([name]) or cond([name]) (not cond:new())", 2) end

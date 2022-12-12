@@ -57,7 +57,7 @@ local function destroy(obj)
     C.box_latch_delete(obj)
 end
 
-function latch.new(name, timeout)
+function latch.new(name)
 	if name == latch then error("Usage: latch.new([name]) or latch([name]) (not latch:new())", 2) end
     local obj = C.box_latch_new()
     if not obj then error("Failed to create latch") end

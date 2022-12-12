@@ -3,7 +3,7 @@ local fiber = require "fiber"
 local wg = {}
 wg.__index = wg
 wg.__tostring = function (self) return "wg<".. (self.name or 'anon') ..">" end
-setmetatable(wg, { __call = function (_, name) return _.new(name) end })
+setmetatable(wg, { __call = function (_, ...) return _.new(...) end })
 
 function wg.new(name, timeout)
 	if name == wg then error("Usage: wg.new([name]) or wg([name]) (not wg:new())", 2) end
