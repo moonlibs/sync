@@ -7,5 +7,6 @@ sync.wg    = require 'sync.wg'
 sync.cv    = sync.wg -- backward compatibility with old interface
 sync.lock  = require 'sync.lock'
 sync.latch = require 'sync.latch'
+sync.pool  = require 'sync.pool'
 
 return sync

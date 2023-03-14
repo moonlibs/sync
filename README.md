@@ -91,6 +91,26 @@ for i = 1, 3 do
 end
 ```
 
+## Pool (fiber pool)
+
+Implementation of fire-and-forget fiber pool.
+
+```lua
+local http = require 'http.client'
+local pool = sync.pool('workers', 4)
+
+for i = 1, 16 do
+	pool:push(function(url)
+		local r = http.get(url)
+		assert(r.status == 200)
+		return r.status, r.headers, r.body
+	end, {"https://tarantool.io"})
+end
+
+pool:wait() -- pool can be awaited
+print("pool finished")
+```
+
 ## More plans and ideas to implement
 
 There are several ideas may be implemented. PR's or proposals are welcome
