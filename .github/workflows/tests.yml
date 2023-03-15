@@ -19,10 +19,10 @@ jobs:
     - name: show perl version
       run: |
         perl -v
-    - name: install Test::Harnesss
+    - name: install TAP::Harnesss
       run: |
         cpanm -v
-        cpanm --notest Test::Harnesss
+        cpanm --notest TAP::Harnesss
     - name: run tests
       run: |
         make test
