@@ -1,0 +1,28 @@
+name: Testing with unit tests
+
+on:
+  - push
+  - pull_request
+
+jobs:
+  run-unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - uses: tarantool/setup-tarantool@v2
+      with:
+        tarantool-version: '2.10.4'
+    - name: setup perl
+      uses: shogo82148/actions-setup-perl@v1
+      with:
+        perl-version: 5.18.4
+    - name: show perl version
+      run: |
+        perl -v
+    - name: install TAP::Harness
+      run: |
+        cpanm -v
+        cpanm --notest TAP::Harness
+    - name: run tests
+      run: |
+        make test
