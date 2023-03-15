@@ -32,17 +32,6 @@ function lock:_self_check()
     end
 end
 
-local function find_lockers(lock, t)
-    t = t or {}
-    --[[
-        1. lock has only one locker fiber
-        2. fiber may have several locks it keeps
-            0. harmless, forget it.
-            1+. check every lock for lockers
-    ]]
-
-end
-
 function lock:aquire(timeout)
 	if getmetatable( self ) ~= lock then
 		error("Usage: lock:aquire() (not lock.aquire())", 2)
