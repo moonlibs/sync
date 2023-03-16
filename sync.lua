@@ -1,5 +1,5 @@
 local sync = {
-	_VERSION = '0.9.0',
+	_VERSION = '0.10.0',
 }
 
 sync.cond  = require 'sync.cond'
