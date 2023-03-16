@@ -20,6 +20,7 @@ build = {
 		['sync.wg'] = 'sync/wg.lua';
 		['sync.lock'] = 'sync/lock.lua';
 		['sync.latch'] = 'sync/latch.lua';
+		['sync.pool'] = 'sync/pool.lua';
 	}
 }
 
