@@ -100,7 +100,7 @@ local http = require 'http.client'
 local pool = sync.pool('workers', 4)
 
 for i = 1, 16 do
-	pool:push(function(url)
+	pool:send(function(url)
 		local r = http.get(url)
 		assert(r.status == 200)
 		return r.status, r.headers, r.body
