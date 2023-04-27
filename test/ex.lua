@@ -1,30 +1,35 @@
 local fiber = require 'fiber'
 local tap = require 'tap'
 
+if os.getenv("LUACOV_ENABLE") then
+    print("enabling luacov")
+    require 'luacov.runner'.init()
+end
+
 local yaml = require 'yaml'.new()
-yaml.cfg{
+yaml.cfg {
     encode_use_tostring = true,
 }
 
 local function upvalues(f)
-	local info = debug.getinfo( f, "uS" )
-	local vars = {}
+    local info = debug.getinfo(f, "uS")
+    local vars = {}
 
-	if ( info and info.what == "Lua" ) then
-		for i = 1, info.nups do
-			local key, value = debug.getupvalue( f, i )
-			vars[ key ] = value
-		end
-	end
+    if (info and info.what == "Lua") then
+        for i = 1, info.nups do
+            local key, value = debug.getupvalue(f, i)
+            vars[key] = value
+        end
+    end
 
-	return vars
+    return vars
 end
 
-local test_mt = assert(upvalues( upvalues( tap.test ).test).test_mt, "Can't find test metatable").__index
+local test_mt = assert(upvalues(upvalues(tap.test).test).test_mt, "Can't find test metatable").__index
 
 function test_mt.raises(test, f, ...)
     local like, message
-    if select('#',...) >= 2 then
+    if select('#', ...) >= 2 then
         like, message = ...
     else
         message = ...
@@ -81,7 +86,7 @@ function test_mt.done_testing(test, num_tests)
 end
 
 local function get_line_name(level)
-    level = 1 + ( level or 2 )
+    level = 1 + (level or 2)
     local info = debug.getinfo(level, "nSl")
     if not info then return 'unknown' end
     return info.short_src .. ':' .. info.currentline;
@@ -94,7 +99,7 @@ function test_mt.deadline(test, f, timeout, message)
     local success = false
     local diag
     local cond = fiber.cond()
-    local watchee = fiber.new(function ()
+    local watchee = fiber.new(function()
         local r, e = pcall(f)
         cond:broadcast()
         if r then
@@ -110,7 +115,7 @@ function test_mt.deadline(test, f, timeout, message)
     if not success then
         io.write(string.format("not ok - %s (deadline)\n", message))
         if diag then
-        io.write('#',string.rep(' ', 2 + 4 * test.level), diag, "\n")
+            io.write('#', string.rep(' ', 2 + 4 * test.level), diag, "\n")
         end
         test.failed = test.failed + 1
         return false
@@ -142,11 +147,11 @@ function test_mt.noyield(test, f, message)
         test.failed = test.failed + 1
         io.write(string.format("no ok - %s (noyield)\n", message))
         if yielded_for ~= 0 then
-            io.write('#',string.rep(' ', 2 + 4 * test.level),
-                ("yielded for %0.6fs\n"):format(tonumber(yielded_for)/1e6))
+            io.write('#', string.rep(' ', 2 + 4 * test.level),
+                ("yielded for %0.6fs\n"):format(tonumber(yielded_for) / 1e6))
         end
         if not success then
-            io.write('#',string.rep(' ', 2 + 4 * test.level), diag, "\n")
+            io.write('#', string.rep(' ', 2 + 4 * test.level), diag, "\n")
         end
         return false
     end

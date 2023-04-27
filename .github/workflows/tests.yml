@@ -12,6 +12,10 @@ jobs:
     - uses: tarantool/setup-tarantool@v2
       with:
         tarantool-version: '2.10.4'
+    - name: install luacov-console
+      run: tarantoolctl rocks install luacov-console
+    - name: install luacov-coveralls
+      run: tarantoolctl rocks install --server=http://luarocks.org luacov-coveralls
     - name: setup perl
       uses: shogo82148/actions-setup-perl@v1
       with:
@@ -24,5 +28,13 @@ jobs:
         cpanm -v
         cpanm --notest TAP::Harness
     - name: run tests
+      env:
+        LUACOV_ENABLE: true
       run: |
         make test
+    - name: print luacov-console report
+      run: .rocks/bin/luacov-console "$(pwd)" && .rocks/bin/luacov-console -s
+    - name: publish coveralls report
+      env:
+        COVERALLS_REPO_TOKEN: ${{ secrets.COVERALLS_REPO_TOKEN }}
+      run: .rocks/bin/luacov-coveralls -v

@@ -1,0 +1,16 @@
+exclude = {
+	"test/",
+	"%.rocks/",
+	"builtin/",
+}
+
+runreport = false
+deletestats = false
+
+coveralls = {
+	root = "/",
+	debug = true,
+	pathcorrect = {
+		{ "^/home/runner/work/sync/sync/", "" },
+	},
+}

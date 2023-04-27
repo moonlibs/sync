@@ -1,16 +1,27 @@
 local fiber = require 'fiber'
 local log = require 'log'
 
+---sync.pool implements blocking fiber pool
 ---@class sync.pool
 ---@field name string
 ---@field workers Fiber[]
 ---@field chan fiber.channel
 ---@field wg sync.wg
 ---@field terminate_cb sync.cond signalled when pool is terminating
+---@field debug boolean? enables debug messages
 local pool = {}
 pool.__index = pool
-pool.__tostring = function (self) return "pool<".. (self.name or 'anon') ..">" end
-setmetatable(pool, { __call = function (class, ...) return class.new(...) end })
+pool.__tostring = function(self) return "pool<" .. (self.name or 'anon') .. ">" end
+setmetatable(pool, { __call = function(class, ...) return class.new(...) end })
+
+---@enum sync.pool.errors
+local errors = {
+	TASK_WAS_CANCELLED = "task was cancelled",
+	TASK_WAS_NOT_AWAITED = "task await timed out",
+	TASK_WAS_NOT_SCHEDULED = "publish timed out (task was not scheduled)",
+}
+
+pool.errors = errors
 
 local cond = require 'sync.cond'
 local wg = require 'sync.wg'
@@ -28,7 +39,7 @@ end
 local function execute(t)
 	t.scheduled_at = fiber.time()
 
-	local pcall_ok, ret = tail_call(xpcall(t.func, debug.traceback, unpack(t.args)))
+	local pcall_ok, ret = tail_call(xpcall(t.func, debug.traceback, unpack(t.args, 1, t.args.n)))
 
 	t.resulted_at = fiber.time()
 	t.result = ret
@@ -57,7 +68,7 @@ end
 local function worker_main_loop(p)
 	local self = fiber.self()
 	local id = self:id()
-	fiber.name(("pool/%s.%s"):format(p.name, id), {truncate = true})
+	fiber.name(("pool/%s.%s"):format(p.name, id), { truncate = true })
 	p.workers[id] = self
 
 	---@return boolean
@@ -66,7 +77,9 @@ local function worker_main_loop(p)
 		return p:_is_running() and p.workers[id] == self
 	end
 
-	log.info("Starting executor %s/%s", p.name, id)
+	if p.debug then
+		log.info("Starting executor %s/%s", p.name, id)
+	end
 
 	while should_live() do
 		---@type sync.pool.task?
@@ -86,6 +99,10 @@ local function worker_main_loop(p)
 
 		local ok, err = pcall(execute, t)
 		p.wg:done()
+		if pool.debug then
+			log.verbose("worker finished task execution with %s",
+				not not t.is_error and ("err:%s"):format(t.result[1]) or "ok")
+		end
 
 		if not ok then
 			log.error("execute on task %s failed: %s", t, err)
@@ -105,12 +122,22 @@ local function worker_main_loop(p)
 	if p.workers[id] == self then
 		p.workers[id] = nil
 	end
-	log.info("Leaving executor %s", id)
+
+	if p.debug then
+		log.info("Leaving executor %s", id)
+	end
 
 	if p.terminated and not next(p.workers) then
-		log.info("closing channel")
-		p.chan:close()
-		p.chan = nil
+		if p.debug then
+			log.info("Last executor leaving loop")
+		end
+		if p.chan then
+			if p.debug then
+				log.info("closing channel")
+			end
+			p.chan:close()
+			p.chan = nil
+		end
 	end
 end
 
@@ -133,7 +160,6 @@ function pool.new(name, pool_size)
 	fp:spawn(pool_size)
 	return fp
 end
-
 
 ---@class sync.pool.runOpts
 ---@field async boolean run in async mode
@@ -163,11 +189,12 @@ function task_mt:wait(timeout, cancel_on_fail)
 	if self.result then
 		self.cb = nil
 		self.pool = nil
+		self.terminate_cb = nil
 		return not self.is_error, unpack(self.result, 1, self.result.n)
 	end
 
 	if self.cancelled then
-		return nil, "task was cancelled"
+		return nil, errors.TASK_WAS_CANCELLED
 	end
 
 	local deadline
@@ -182,6 +209,7 @@ function task_mt:wait(timeout, cancel_on_fail)
 		if self.result then
 			self.cb = nil
 			self.pool = nil
+			self.terminate_cb = nil
 			return not self.is_error, unpack(self.result, 1, self.result.n)
 		end
 		self.cb:recv(math.min(1, deadline - fiber.time()))
@@ -194,17 +222,17 @@ function task_mt:wait(timeout, cancel_on_fail)
 			self.cancelled = true
 		end
 
+		self.terminate_cb = nil
 		self.cb = nil
 	end
 
-	return nil, "timed out"
+	return nil, errors.TASK_WAS_NOT_AWAITED
 end
-
 
 ---On finish callback will be called at the end of the execution
 ---@generic T
----@param on_finish_cb fun(on_finish_ctx: T) callback
----@param on_finish_ctx T context will be passed as first argument to on_finish_cb
+---@param on_finish_cb fun(on_finish_ctx?: T, is_processed: boolean, result_or_error: ...) callback
+---@param on_finish_ctx? T context will be passed as first argument to on_finish_cb
 function task_mt:on_finish(on_finish_cb, on_finish_ctx)
 	self.on_finish_ctx = on_finish_ctx
 	self.on_finish_cb = on_finish_cb
@@ -215,12 +243,92 @@ function task_mt:__gc()
 	self.cb = nil
 end
 
----Executes given function with arguments on pool
+---Executes given function with arguments on the pool
+---
+---`pool:send()` raises exception if pool has been terminated
+---
+---**Staightforward (asynchronous, recommended) usage**:
+---
+---    local task, err = pool:send(function(arg_1, arg_2)
+---        -- do work on the executor
+---    end, {arg_1, arg_2})
+---
+---    -- assert fails only if task was not and will not be scheduled
+---    assert(task, err)
+---
+---Task can be awaited separately if it was returned
+---
+---    local success, err_or_multiret, ... = task:wait(timeout)
+---
+---Or you may specify finish callback
+---
+---    -- This callback won't be called if task was not scheduled
+---    task:on_finish(function(success, ...)
+---       if not success then
+---           local err = ...
+---           -- process `err` if you need
+---       else
+---           local multiret = {...}
+---           -- process result of the task if task returns anything
+---       end
+---    end)
+---
+---You may pass `context` to use generic finalizer
+---
+---    local function finalizer(context, success, ...)
+---        -- finalizes results and errors of the tasks
+---    end
+---
+---    local context = {name='my super important task'}
+---    task:on_finish(finalizer, context)
+---
+---**Any exception raised inside finalizer will be silenced**
+---
+---You may use both `task:wait()` and `task:on_finish` simultaneously
+---
+---`task:on_finish()` will be called before `task:wait()` unblocks
+---
+---**Synchronous execution**
+---
+---You may use the same pool for synchronous executions
+---
+---    local success, multiresult_or_error = pool:send(task_func, {}, {async = false})
+---
+---In this case caller will be blocked until task finishes or pool terminates
+---
+---`success` can have 3 values
+---  * `true` - task was awaited with success
+---  * `false` - task was awaited but raised an exception
+---  * `nil` - task was not awaited or was not scheduled
+---
+---In both asynchornous and synchornous use caller may specify `wait_timeout`
+---
+---For asynchornous use `wait_timeout` specifices only publish timeout
+---
+---    local task, err = sync:send(worker_f, args, {wait_timeout = 1})
+---    -- for asynchronous use only error "task was not scheduled" can be returned
+---    if not task then assert(err == pool.errors.TASK_WAS_NOT_SCHEDULED) end
+---
+---For synchornous use `wait_timeout` specified both publish and await timeout
+---
+---    local ok, ret_or_err, ... = sync:send(worker_f, args, {wait_timeout=1, async=false})
+---    if ok == nil then
+---        local err = ret_or_err
+---        if err == pool.errors.TASK_WAS_NOT_SCHEDULED then
+---            -- task will not be processed
+---        elseif err == pool.errors.TASK_WAS_NOT_AWAITED then ...
+---            -- task in progress but was not awaited
+---        else
+---            -- unreachable code (unknown error)
+---        end
+---    end
+---
 ---@param func fun()|table function to execute
----@param args any[] arguments for the call will passed as arguments to given function
----@param opts sync.pool.runOpts options for the task (async is true by default)
+---@param args? any[] arguments for the call will passed as arguments to given function
+---@param opts? sync.pool.runOpts options for the task (async is true by default)
+---@return sync.pool.task|boolean|nil maybe_task, string? error_message # (async) false will be returned only when task was not scheduled
 function pool:send(func, args, opts)
-	if getmetatable( self ) ~= pool then
+	if getmetatable(self) ~= pool then
 		error("Usage: pool:send() (not pool.send())", 2)
 	end
 	if type(args) == 'nil' then
@@ -262,7 +370,7 @@ function pool:send(func, args, opts)
 
 	while not self.terminate_cb:recv(0) and fiber.time() < deadline do
 		fiber.testcancel()
-		if self.chan:put(task, math.min(1, deadline-fiber.time())) then
+		if self.chan:put(task, math.min(1, deadline - fiber.time())) then
 			task.published_at = fiber.time()
 			break
 		end
@@ -277,7 +385,7 @@ function pool:send(func, args, opts)
 		task.cancelled = true
 		task.terminate_cb = nil
 
-		return false, "publish timed out (task was not scheduled)"
+		return nil, errors.TASK_WAS_NOT_SCHEDULED
 	end
 
 	if opts.async then
@@ -294,7 +402,7 @@ end
 ---Spawns n more workers (by default 1)
 ---@param n number? how many workers needs to spawn
 function pool:spawn(n)
-	if getmetatable( self ) ~= pool then
+	if getmetatable(self) ~= pool then
 		error("Usage: pool:spawn() (not pool.spawn())", 2)
 	end
 
@@ -307,6 +415,7 @@ end
 
 ---Countes items in the table
 ---@param tbl table
+---@return number
 local function count(tbl)
 	local c = 0
 	for _ in pairs(tbl) do
@@ -318,7 +427,7 @@ end
 ---Despawns n workers (by default 1)
 ---@param n number? how many workers needs to despawn
 function pool:despawn(n)
-	if getmetatable( self ) ~= pool then
+	if getmetatable(self) ~= pool then
 		error("Usage: pool:despawn() (not pool.despawn())", 2)
 	end
 
@@ -334,15 +443,27 @@ function pool:despawn(n)
 end
 
 ---Checks that pool is running
----@return boolean
+---@return boolean # `true` if pool was terminated, `false` otherwise
 function pool:_is_running()
 	return self.terminated ~= true
 end
 
 ---Terminates pool
----@param force boolean? if true then closes channel and cancels workers
+---
+---Usage:
+---
+---    -- you should first try to terminate pool gracefully
+---    -- any subsequent call will force fiber cancellations
+---    pool:terminate()
+---    if not pool:wait(timeout) then
+---        -- if pool is not terminated within given timeout,
+---        -- terminate it with force
+---        pool:terminate(true)
+---        pool:wait()
+---    end
+---@param force boolean? if true then closes channel and cancels workers with force
 function pool:terminate(force)
-	if getmetatable( self ) ~= pool then
+	if getmetatable(self) ~= pool then
 		error("Usage: pool:terminate() (not pool.terminate())", 2)
 	end
 
@@ -357,12 +478,19 @@ function pool:terminate(force)
 	self.chan:close()
 	self.chan = nil
 
+	log.warn("terminating workers: force=%s", not not force)
 	for id, w in pairs(self.workers) do
-		if type(w) == 'table' and w.cancel and w:status() ~= "dead" then
-			local ok, err = pcall(w.cancel, w)
-			if not ok then
-				log.error("failed to cancel fiber %s: %s", w, err)
+		if type(w) == 'userdata' and w.cancel then
+			if w:status() ~= "dead" then
+				log.warn("canceling fiber %s/%s", id, w:name())
+				local ok, err = pcall(w.cancel, w)
+				if not ok then
+					log.error("failed to cancel fiber %s: %s", w, err)
+				else
+					self.workers[id] = nil
+				end
 			else
+				log.warn("worker already dead %s/%s", id, w:name())
 				self.workers[id] = nil
 			end
 		end
@@ -373,7 +501,7 @@ end
 ---@param timeout number? timeout in seconds (default inifinity)
 ---@return true|nil awaited, string? error_message
 function pool:wait(timeout)
-	if getmetatable( self ) ~= pool then
+	if getmetatable(self) ~= pool then
 		error("Usage: pool:wait() (not pool.wait())", 2)
 	end
 

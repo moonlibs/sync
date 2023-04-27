@@ -4,35 +4,37 @@ local fiber = require 'fiber'
 local test = require('test.ex').test('pool')
 
 local sync = require('sync')
-test:ok(sync.pool.new(), 'anon new by method' )
-test:ok(sync.pool(), 'anon new by call' )
+test:ok(sync.pool.new(), 'anon new by method')
+test:ok(sync.pool(), 'anon new by call')
 test:ok(sync.pool.new('test1'), 'named new by method')
 test:ok(sync.pool('test2'), 'named new by call')
 
-test:raises(function ()
+test:raises(function()
 	sync.pool:new()
 end, 'wrong constructor call')
 
-test:raises(function ()
+test:raises(function()
 	local pool = sync.pool()
 	pool.send()
 end, 'Usage: pool:send%(%) %(not pool%.send%(%)%)', 'static call send on object')
-test:raises(function ()
+test:raises(function()
 	local pool = sync.pool()
 	pool.wait()
 end, 'Usage: pool:wait%(%) %(not pool%.wait%(%)%)', 'static call wait on object')
-test:raises(function ()
+test:raises(function()
 	local pool = sync.pool()
 	pool.spawn()
 end, 'Usage: pool:spawn%(%) %(not pool%.spawn%(%)%)', 'static call spawn on object')
-test:raises(function ()
+test:raises(function()
 	local pool = sync.pool()
 	pool.despawn()
 end, 'Usage: pool:despawn%(%) %(not pool%.despawn%(%)%)', 'static call despawn on object')
-test:raises(function ()
+test:raises(function()
 	local pool = sync.pool()
 	pool.terminate()
 end, 'Usage: pool:terminate%(%) %(not pool%.terminate%(%)%)', 'static call terminate on object')
+
+sync.pool.debug = true
 
 test:deadline(function()
 	local pool = sync.pool()
@@ -72,8 +74,7 @@ test:deadline(function()
 	fiber.sleep(0.15) -- termination lag is at least 100ms
 
 	test:ok(pool.chan == nil, "pool has removed internal channel")
-	test:is(require'fun'.length(pool.workers), 0, "all workers was removed")
-
+	test:is(require 'fun'.length(pool.workers), 0, "all workers was removed")
 end, 3, 'pool unlocks send after task was received on executor')
 
 test:deadline(function()
@@ -83,7 +84,7 @@ test:deadline(function()
 	local start = fiber.time()
 	for i = 1, 3 do
 		pool:send(function()
-			jobs[i] = {registered = fiber.time()}
+			jobs[i] = { registered = fiber.time() }
 			fiber.sleep(0.5)
 			jobs[i].processed = fiber.time()
 		end)
@@ -109,8 +110,7 @@ test:deadline(function()
 	test:ok(ok, "task executed successfully")
 	test:is(ret1, value1, 'vararg matches - 1')
 	test:is(ret2, value2, 'vararg matches - 2')
-
-end, 3, 'task can be awaited in synchornouse way')
+end, 3, 'task can be awaited in  way')
 
 test:deadline(function()
 	local pool = sync.pool()
@@ -122,7 +122,7 @@ test:deadline(function()
 
 	local has_result, err = task:wait(0)
 	test:is(has_result, nil, "result is nil - not given yet")
-	test:is(err, "timed out", "error message is timed out")
+	test:is(err, "task await timed out", "error message is task await timed out")
 
 	local ft = fiber.time()
 	local ok, result = task:wait()
@@ -155,7 +155,7 @@ test:deadline(function()
 	local ret, err = pool:send(function()
 		short.scheduled = true
 		return 2
-	end, {}, {wait_timeout = 0.01})
+	end, {}, { wait_timeout = 0.01 })
 
 	test:ok(not ret, ":send returned false")
 	test:is(err, "publish timed out (task was not scheduled)", "message was correct")
@@ -202,7 +202,125 @@ test:deadline(function()
 	test:ok(results[2], "task 2 was processed")
 	test:ok(results[3], "task 3 was processed")
 	test:ok(results[4], "task 4 was processed")
-
 end, 3, "pool is continues processing all tasks when terminating")
+
+test:deadline(function()
+	local pool = sync.pool.new('pool', 3)
+
+	local termchan = fiber.channel()
+	local final = fiber.channel()
+	fiber.create(function()
+		-- do some real work
+		test:raises(function()
+			for i = 1, 10 do
+				local t = pool:send(function()
+					fiber.sleep(i)
+					fiber.testcancel()
+				end)
+				if t then
+					t:on_finish(function(ok, ...)
+						print("on_finish", ok, ...)
+					end)
+				end
+				if i % 4 == 0 then
+					termchan:put(true)
+				end
+			end
+		end, 'pool:send%(%) attempt to schedule task on terminated pool', 'schedule on forcefully terminated pool')
+		final:put(true)
+	end)
+
+	termchan:get()
+	pool:terminate(true)
+	assert(pool:wait())
+	final:get()
+end, 3, "moonlibs/sync/issues/4")
+
+test:deadline(function()
+	local pool = sync.pool.new('pool', 3)
+
+	local fin = fiber.channel()
+	pool:send(fiber.sleep, { 0.1 }):on_finish(fin.put, fin)
+	pool:send(fiber.sleep, { 0.1 }):on_finish(fin.put, fin)
+	pool:send(fiber.sleep, { 0.1 }):on_finish(fin.put, fin)
+
+	local was_executed = false
+	local ok, err = pool:send(function() was_executed = true end, {}, { wait_timeout = 0.001 })
+
+	test:is(ok, nil, "last task was not finished")
+	test:is(err, sync.pool.errors.TASK_WAS_NOT_SCHEDULED, "error message is task was not schedulled")
+	test:is(was_executed, false, "not scheduled task must not be executed")
+
+	for _ = 1, 3 do fin:get() end
+	test:is(was_executed, false, "even when pool is empty not schedulled task must not be executed")
+
+	pool:terminate()
+end, 3, "synchronous pool with wait_timeout")
+
+test:deadline(function()
+	local pool = sync.pool.new('pool', 1)
+	pool:send(fiber.sleep, { 1 })
+
+	test:raises(function()
+		pool:send(function()
+		end, {}, { wait_timeout = -0.1 })
+	end, 'pool:send%(%): wait_timeout is too little')
+end, 1, "synchronous send with maformed wait_timeout")
+
+test:deadline(function()
+	local pool = sync.pool.new('pool', 1)
+	local ok, err = pool:send(fiber.sleep, { 0.5 }, { wait_timeout = 0.05, async = false })
+
+	test:is(ok, nil, "task cant be awaited")
+	test:is(err, sync.pool.errors.TASK_WAS_NOT_AWAITED, "error message should be task was not awaited")
+
+	pool:terminate()
+	pool:wait()
+end, 1, "synchornous long running task with little wait_timeout can not be awaited")
+
+test:deadline(function()
+	local pool = sync.pool.new('pool', 1)
+	local task = pool:send(fiber.sleep, { 0.1 })
+	assert(type(task) == 'table')
+
+	local fin = fiber.channel()
+	task:on_finish(function(t)
+		t.cb = {}
+		fin:put(true)
+	end, task)
+
+	fin:get()
+	fiber.yield()
+
+	local ok, res = task:wait()
+	test:is(ok, false, "corrupted task is failed")
+	test:is(task.is_error, true, "task finished with error")
+
+	pool:terminate()
+	pool:wait()
+end, 1, "corrupted internal task structure handled correctly")
+
+test:deadline(function()
+	local pool = sync.pool.new('pool', 1)
+
+	local fins = {}
+	pool:send(fiber.sleep, { 0.1 }):on_finish(function()
+		fins[1] = true
+	end)
+
+	pool:spawn(1)
+	test:is(require 'fun'.length(pool.workers), 2, "now pool has 2 workers")
+
+	pool:send(fiber.sleep, { 0.1 }):on_finish(function()
+		fins[2] = true
+	end)
+
+	pool:despawn(1)
+	pool:wait()
+	pool:terminate()
+
+	test:is(fins[1], true, "first task finished ok")
+	test:is(fins[2], true, "second task finished ok")
+end, 1, "spawn/despawn does not cancel scheduled tasks")
 
 test:done_testing()
