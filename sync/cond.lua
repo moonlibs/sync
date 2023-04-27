@@ -1,10 +1,17 @@
 local fiber = require "fiber"
 
+---@class sync.cond
+---@field name string
+---@field timeout number? default timeout for :recv()
 local cond = {}
 cond.__index = cond
 cond.__tostring = function (self) return "cond<".. (self.name or 'anon') ..">" end
 setmetatable(cond, { __call = function (_, ...) return _.new(...) end })
 
+---Creates new sync.cond
+---@param name string? name of sync.cond
+---@param timeout number? default timeout for sync.recv
+---@return sync.cond
 function cond.new(name, timeout)
 	if name == cond then error("Usage: cond.new([name]) or cond([name]) (not cond:new())", 2) end
 	return setmetatable({

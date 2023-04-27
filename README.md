@@ -1,3 +1,5 @@
+[![Coverage Status](https://coveralls.io/repos/github/moonlibs/sync/badge.svg?branch=master)](https://coveralls.io/github/moonlibs/sync?branch=master)
+
 # Collection of synchronization primitives for Tarantool fibers
 
 ## Conditional Variable (cond)
@@ -109,6 +111,33 @@ end
 
 pool:wait() -- pool can be awaited
 print("pool finished")
+```
+
+sync.pool is usefull in background fibers when you need to parallel networks requests
+```lua
+
+function job:start()
+    self.fiber_f = fiber.create(function()
+        local pool = sync.pool('fetches', 4)
+        while self.is_active do
+            for _, user in box.space.users:pairs() do
+                if self.is_active then
+                    -- fast exit
+                    break
+                end
+                pool:send(process_user_network, {user})
+            end
+        end
+        pool:terminate()
+        if not pool:wait(gracefull_timeout) then
+            -- terminate pool with force
+            log.warn("forcefully terminating pool")
+            pool:terminate(true)
+            pool:wait()
+        end
+    end)
+end
+
 ```
 
 ## More plans and ideas to implement
