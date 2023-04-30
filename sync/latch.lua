@@ -43,11 +43,11 @@ for _, def in pairs(defs) do
 end
 end
 
--- ffi.metatype('', {})
-
-local latch = {
-    -- WAIT_WINDOW = 1/3,
-}
+---Latch is bindings to lightweight tarantool locks
+---@class sync.latch
+---@field name string? name of the latch if was given
+---@field obj ffi.ctype* latch object itself
+local latch = {}
 latch.__index = latch
 latch.__tostring = function (self) return "latch<".. (self.name or 'anon') ..">" end
 setmetatable(latch, { __call = function (_, name) return _.new(name) end})
@@ -57,36 +57,45 @@ local function destroy(obj)
     C.box_latch_delete(obj)
 end
 
+---Creates new latch
+---@param name string? name of the latch
+---@return sync.latch
 function latch.new(name)
-	if name == latch then error("Usage: latch.new([name]) or latch([name]) (not latch:new())", 2) end
+    if name == latch then error("Usage: latch.new([name]) or latch([name]) (not latch:new())", 2) end
     local obj = C.box_latch_new()
     if not obj then error("Failed to create latch") end
     ffi.gc(obj, destroy)
 
-	return setmetatable({
+    return setmetatable({
         obj     = obj;
-		name    = name;
-	}, latch)
+        name    = name;
+    }, latch)
 end
 
+---Locks latch
+---
+---this method does not accept timeout, so can be locked infinetely long
 function latch:lock()
-	if getmetatable( self ) ~= latch then
-		error("Usage: latch:lock() (not latch.lock())", 2)
-	end
+    if getmetatable( self ) ~= latch then
+        error("Usage: latch:lock() (not latch.lock())", 2)
+    end
     C.box_latch_lock(self.obj)
 end
 
+---Fast checks if latch can be locked
+---@return boolean success # returns true if latch was captured
 function latch:trylock()
-	if getmetatable( self ) ~= latch then
-		error("Usage: latch:trylock() (not latch.trylock())", 2)
-	end
+    if getmetatable( self ) ~= latch then
+        error("Usage: latch:trylock() (not latch.trylock())", 2)
+    end
     return C.box_latch_trylock(self.obj) == 0 -- 0 means success
 end
 
+---Releases locked latch
 function latch:unlock()
-	if getmetatable( self ) ~= latch then
-		error("Usage: latch:unlock() (not latch.unlock())", 2)
-	end
+    if getmetatable( self ) ~= latch then
+        error("Usage: latch:unlock() (not latch.unlock())", 2)
+    end
     C.box_latch_unlock(self.obj)
 end
 
@@ -98,10 +107,16 @@ local function tail(self, r, ...)
     return ...
 end
 
+---Wrapper lock()/unlock() which executes `f`
+---
+---latch will be released whether function raised exception or not
+---@param f fun(...:any) callable object, usually function of the critical section
+---@param ... any? arguments of the function
+---@return ... # return result of the function or raises exception
 function latch:with(f, ...)
-	if getmetatable( self ) ~= latch then
-		error("Usage: latch:with(fn) (not latch.with(fn))", 2)
-	end
+    if getmetatable( self ) ~= latch then
+        error("Usage: latch:with(fn) (not latch.with(fn))", 2)
+    end
     self:lock()
     return tail(self, pcall(f, ...))
 end

@@ -3,6 +3,7 @@ local fiber = require "fiber"
 ---@class sync.cond
 ---@field name string
 ---@field timeout number? default timeout for :recv()
+---@field sent boolean? was data sent through condvar
 local cond = {}
 cond.__index = cond
 cond.__tostring = function (self) return "cond<".. (self.name or 'anon') ..">" end
@@ -20,6 +21,10 @@ function cond.new(name, timeout)
 	}, cond)
 end
 
+---Sends data to the cond and receiver
+---
+---Method raises exception if any data was already sent through this cond
+---@param data any data you want to send (please do not send nil/box.NULL, it is acceptable but not usable)
 function cond:send(data)
 	if getmetatable( self ) ~= cond then
 		error("Usage: cond:send(value) (not cond.send(value))", 2)
@@ -34,6 +39,9 @@ function cond:send(data)
 	end
 end
 
+---Receives data from conditional variable
+---@param timeout number? timeout in seconds to wait for data (default self.timeout or infinity)
+---@return any|nil, string? error_message # returns `sent data` if was awaited, or nil, "Timed out" otherwise
 function cond:recv(timeout)
 	if getmetatable( self ) ~= cond then
 		error("Usage: cond:send(value) (not cond.send(value))", 2)

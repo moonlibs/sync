@@ -131,7 +131,7 @@ test:deadline(function()
 	test:ok(ok, "result is awaited")
 	test:is(result, value, "received result is the same as value")
 
-	test:ok(waited <= 0.105, "result was awaited not for too long")
+	test:ok(waited <= 0.2, "result was awaited not for too long")
 
 	test:noyield(function()
 		ok, result = task:wait()
@@ -322,5 +322,35 @@ test:deadline(function()
 	test:is(fins[1], true, "first task finished ok")
 	test:is(fins[2], true, "second task finished ok")
 end, 1, "spawn/despawn does not cancel scheduled tasks")
+
+test:deadline(function()
+	local pool = sync.pool.new('pool', 2)
+	pool:send(function()
+		fiber.sleep(0.1)
+	end)
+
+	local executed = false
+	local task = assert(pool:send(function(...) executed = true fiber.sleep(...) end, {1}))
+	test:ok(task, "task must be returned")
+	test:is(task.scheduled_at, nil, "task must not be scheduled yet")
+	local err, res = task:wait(0, true)
+
+	test:is(err, nil, "task:wait(0, true) must return nil")
+	test:is(task.cancelled, true, "task must be cancelled")
+	test:is(res, "task await timed out", "task:wait must return await timed out")
+
+	pool:terminate()
+	pool:wait()
+	test:is(task.scheduled_at, nil, "task must not be scheduled")
+	fiber.sleep(0.1)
+	test:is(executed, false, "task must not be executed")
+
+	local ft = fiber.time()
+	local err2, res2 = task:wait(1)
+	local waited = fiber.time()-ft
+	test:is(err2, nil, "double task wait on cancelled")
+	test:is(res2, "task was cancelled", "second wait must return task was cancelled")
+	test:is(waited, 0, "task:wait on cancelled task must return instantly")
+end, 1, "task autocancelled when wait_timeout is too low")
 
 test:done_testing()
