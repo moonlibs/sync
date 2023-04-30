@@ -1,6 +1,6 @@
-[![Coverage Status](https://coveralls.io/repos/github/moonlibs/sync/badge.svg?branch=master)](https://coveralls.io/github/moonlibs/sync?branch=master)
-
 # Collection of synchronization primitives for Tarantool fibers
+
+[![Coverage Status](https://coveralls.io/repos/github/moonlibs/sync/badge.svg?branch=master)](https://coveralls.io/github/moonlibs/sync?branch=master)
 
 ## Conditional Variable (cond)
 
@@ -19,8 +19,8 @@ local value = cond:recv()
 local cond = sync.cond()
 
 fiber.create(function()
-	fiber.sleep(1)
-	cond:send('some data')
+    fiber.sleep(1)
+    cond:send('some data')
 end)
 
 print(cond:recv())
@@ -34,10 +34,10 @@ Used to wait for finishing of several simultaneous/parallel tasks.
 local wg = sync.wg()
 
 for 1..10 do
-	wg:start() -- or wg:begin()
-	fiber.create(function()
-		wg:done() -- or wg:finish()
-	end)
+    wg:start() -- or wg:begin()
+    fiber.create(function()
+        wg:done() -- or wg:finish()
+    end)
 end
 
 wg:wait(timeout)
@@ -50,7 +50,6 @@ Sadly we cannod use the pair `begin`/`end`, since `end` is a keyword. One could 
 
 There is alternative name `sync.cv` for `sync.wg` for compatibility with the previous version.
 
-
 ## Mutex (lock) with deadlock detection
 
 Heavyweight mutex, which is assigned to fiber. That allows to implement deadlock detection.
@@ -59,17 +58,17 @@ Heavyweight mutex, which is assigned to fiber. That allows to implement deadlock
 local lock = sync.lock()
 
 for i = 1, 3 do
-	fiber.create(function(i)
-		lock:acquire()
-		fiber.sleep(math.random())
-		print(i, "doing work")
-		fiber.sleep(math.random())
-		lock:release()
-	end,i)
+    fiber.create(function(i)
+        lock:acquire()
+        fiber.sleep(math.random())
+        print(i, "doing work")
+        fiber.sleep(math.random())
+        lock:release()
+    end,i)
 end
 
 lock:with(function()
-	-- critical section
+    -- critical section
 end)
 ```
 
@@ -83,13 +82,13 @@ Rather performant, but without any sugar, like deadlock detection
 local lock = sync.latch()
 
 for i = 1, 3 do
-	fiber.create(function(i)
-		lock:acquire()
-		fiber.sleep(math.random())
-		print(i, "doing work")
-		fiber.sleep(math.random())
-		lock:release()
-	end,i)
+    fiber.create(function(i)
+        lock:acquire()
+        fiber.sleep(math.random())
+        print(i, "doing work")
+        fiber.sleep(math.random())
+        lock:release()
+    end,i)
 end
 ```
 
@@ -102,11 +101,11 @@ local http = require 'http.client'
 local pool = sync.pool('workers', 4)
 
 for i = 1, 16 do
-	pool:send(function(url)
-		local r = http.get(url)
-		assert(r.status == 200)
-		return r.status, r.headers, r.body
-	end, {"https://tarantool.io"})
+    pool:send(function(url)
+        local r = http.get(url)
+        assert(r.status == 200)
+        return r.status, r.headers, r.body
+    end, {"https://tarantool.io"})
 end
 
 pool:wait() -- pool can be awaited
@@ -114,8 +113,8 @@ print("pool finished")
 ```
 
 sync.pool is usefull in background fibers when you need to parallel networks requests
-```lua
 
+```lua
 function job:start()
     self.fiber_f = fiber.create(function()
         local pool = sync.pool('fetches', 4)
@@ -137,7 +136,6 @@ function job:start()
         end
     end)
 end
-
 ```
 
 ## More plans and ideas to implement
@@ -146,11 +144,10 @@ There are several ideas may be implemented. PR's or proposals are welcome
 
 * Named wait groups — names instead of counters
 * fiber.select — ability to wait for something waitable (like in go)
-	* fiber.select or wait_any/wait_all
-	* https://github.com/tarantool/tarantool/issues/5635
-* Joinable fiber pool
+  * fiber.select or wait_any/wait_all
+  * <https://github.com/tarantool/tarantool/issues/5635>
 * "Normal" joinable fiber (like coro)
-	* able to "return"
-	* able to rethrow
-	* zombie status: no tombstones in fiber pool
+  * able to "return"
+  * able to rethrow
+  * zombie status: no tombstones in fiber pool
 * Channel+luafun
