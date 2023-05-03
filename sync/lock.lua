@@ -1,5 +1,9 @@
 local fiber = require "fiber"
 
+---@class sync.lock
+---@field name string name of the lock
+---@field locked false|number false when no one acquired lock, `fiber_id` otherwise
+---@field _lock fiber.cond
 local lock = {
     WAIT_WINDOW = 1/3,
 }
@@ -10,11 +14,9 @@ setmetatable(lock, { __call = function (_, name) return _.new(name) end })
 
 local FIBER_STORE = 'sync.lock'
 
---- debug routine
--- local function print(...)
---     return _G.print(fiber.id(), ...)
--- end
-
+---Creates new lock
+---@param name string? name of the lock
+---@return sync.lock
 function lock.new(name)
 	if name == lock then error("Usage: lock.new([name]) or lock([name]) (not lock:new())", 2) end
 	return setmetatable({
@@ -32,6 +34,15 @@ function lock:_self_check()
     end
 end
 
+---Tries to acquire lock
+---
+---Returns `true` on success, returns `false` on timed out
+---
+---Raises exception when attempting to acquire same lock twice in the same fiber
+---
+---Raises exception when deadlock is discovered
+---@param timeout? number timeout in seconds, default timeout is infinity
+---@return boolean # `true` if lock was successfully captured, `false` whe timed out
 function lock:aquire(timeout)
 	if getmetatable( self ) ~= lock then
 		error("Usage: lock:aquire() (not lock.aquire())", 2)
@@ -102,16 +113,15 @@ function lock:aquire(timeout)
     end
 
     self.locked = fiber.id()
-    -- print("[".. tostring(self) .. "] + aquired by ", fiber.id());
     return true
-
-    -- local deadline
-    -- if timeout then
-    --     deadline = fiber.time() + timeout;
-    -- end
 end
 lock.lock = lock.aquire
 
+---Releases lock
+---
+---Raises exception when lock is acquired by noone
+---
+---Does not check lock ownership
 function lock:release()
 	if getmetatable( self ) ~= lock then
 		error("Usage: lock:release() (not lock.release())", 2)
@@ -120,7 +130,6 @@ function lock:release()
 		error("lock:release called on not aquired lock", 2)
 	end
     self.locked = false
-    -- print("[".. tostring(self) .. "] - released by ", fiber.id());
     if self._lock then
         self._lock:signal()
     end
@@ -135,6 +144,13 @@ local function tail(self, r, ...)
     return ...
 end
 
+---Executes given function under lock
+---
+---:with() reraises exception if function raised exception
+---lock will be automatically released regardless success of function execution
+---@param f fun() function of the critical section
+---@param ... any arguments for the function
+---@return ... # returns result of the function
 function lock:with(f, ...)
 	if getmetatable( self ) ~= lock then
 		error("Usage: lock:with(fn) (not lock.with(fn))", 2)

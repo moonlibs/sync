@@ -76,9 +76,7 @@ end, 3, 'concurrent locks')
 
 test:deadline(function()
 	local lock = sync.latch()
-	local completed = 0
 	local N = 10
-	local value = 0
 
 	local fibers = {}
 
@@ -127,10 +125,8 @@ test:deadline(function()
 	lock:unlock()
 end, 3, 'trylock no yield')
 
-do
+test:deadline(function()
 	test:diag("Test from synchronized")
-
-	local fiber = require('fiber')
 
 	local in_action = 0
 	local function criticalsection(id)
@@ -141,7 +137,7 @@ do
 		test:is(in_action, 1, "in action only 1 fiber in "..id)
 		in_action = in_action - 1
 	end
-	local lock = sync.lock('somekey')
+	local lock = sync.latch('somekey')
 
 	local N = 3
 	local ch = fiber.channel(N)
@@ -155,6 +151,6 @@ do
 	for _=1, N do
 		ch:get()
 	end
-end
+end, 3, 'latch 3 fibers')
 
 test:done_testing()

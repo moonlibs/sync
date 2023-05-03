@@ -3,6 +3,8 @@ local fiber = require "fiber"
 ---@class sync.wg
 ---@field name string name of the waitgroup
 ---@field timeout number? default wait timeout
+---@field active number
+---@field completed boolean?
 local wg = {}
 wg.__index = wg
 wg.__tostring = function (self) return "wg<".. (self.name or 'anon') ..">" end
@@ -23,6 +25,8 @@ function wg.new(name, timeout)
 	}, wg)
 end
 
+---Increments counter by n (default 1)
+---@param n number? increment (1 if not given)
 function wg:start(n)
 	if getmetatable( self ) ~= wg then
 		error("Usage: wg:start() (not wg.start())", 2)
@@ -32,6 +36,9 @@ function wg:start(n)
 end
 wg.add = wg.start
 
+---Decrements counter by 1
+---
+---Notifies waiters when counter==0.
 function wg:finish()
 	if getmetatable( self ) ~= wg then
 		error("Usage: wg:finish() (not wg.finish())", 2)
@@ -49,6 +56,9 @@ function wg:finish()
 end
 wg.done = wg.finish
 
+---Awaits wait group
+---@param timeout number? timeout in seconds (default self.timeout or infinety)
+---@return true|nil awaited, string? error_message # returns `true` when wg was awaited, and `nil` when "Timed out"
 function wg:wait(timeout)
 	if getmetatable( self ) ~= wg then
 		error("Usage: wg:wait([timeout]) (not wg.wait([timeout]))", 2)

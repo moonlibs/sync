@@ -85,7 +85,7 @@ local function worker_main_loop(p)
 		---@type sync.pool.task?
 		local t
 		repeat
-			t = p.chan:get(0.01) --[[@as sync.pool.task?]]
+			t = p.chan:get() --[[@as sync.pool.task?]]
 		until (not should_live()) or t
 
 		if type(t) ~= 'table' then
@@ -133,9 +133,8 @@ local function worker_main_loop(p)
 		end
 		if p.chan then
 			if p.debug then
-				log.info("closing channel")
+				log.info("removing channel")
 			end
-			p.chan:close()
 			p.chan = nil
 		end
 	end
@@ -238,11 +237,6 @@ function task_mt:on_finish(on_finish_cb, on_finish_ctx)
 	self.on_finish_cb = on_finish_cb
 end
 
-function task_mt:__gc()
-	self.terminate_cb = nil
-	self.cb = nil
-end
-
 ---Executes given function with arguments on the pool
 ---
 ---`pool:send()` raises exception if pool has been terminated
@@ -323,7 +317,7 @@ end
 ---        end
 ---    end
 ---
----@param func fun()|table function to execute
+---@param func fun(...:any)|table function to execute
 ---@param args? any[] arguments for the call will passed as arguments to given function
 ---@param opts? sync.pool.runOpts options for the task (async is true by default)
 ---@return sync.pool.task|boolean|nil maybe_task, string? error_message # (async) false will be returned only when task was not scheduled
@@ -472,10 +466,10 @@ function pool:terminate(force)
 		if type(self.terminate_cb) == 'table' and not self.terminate_cb.sent then
 			self.terminate_cb:send(true)
 		end
+		self.chan:close()
 		if not force then return end
 	end
 
-	self.chan:close()
 	self.chan = nil
 
 	log.warn("terminating workers: force=%s", not not force)
