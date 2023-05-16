@@ -138,6 +138,27 @@ function job:start()
 end
 ```
 
+## Rate (token bucket rateimiter)
+
+Implements classic Token Bucket algorithm limited with `burst` (integer non-negative value) and `rps` (floating value).
+
+If you need to limit your requests to resource with `rps`, you might want to create Token Bucket with `burst=1` and `rps=rps`.
+
+To limit your requests you better use common method `rate:wait()` it awaits only single token but not limited with timeout.
+
+When you need to wait rate-limiter at most `timeout` seconds then you can specify that as first argument: `rate:wait(timeout)`.
+
+Note, that rate-limiter returns immediately if token can't be awaited within provided `timeout` (noyield response).
+
+```lua
+local rate = sync.rate.new("rlimit", 10/60, 1) -- 10 requests / 60 seconds, with burst=1
+assert(rate:wait()) -- infinitely wait for ratelimit
+```
+
+Read more about Token Bucket <https://en.wikipedia.org/wiki/Token_bucket>
+
+Inspired by golang's time/rate <https://pkg.go.dev/golang.org/x/time/rate>
+
 ## More plans and ideas to implement
 
 There are several ideas may be implemented. PR's or proposals are welcome

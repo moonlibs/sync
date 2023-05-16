@@ -1,34 +1,39 @@
 local fiber = require "fiber"
 
----@class sync.limit
+---@class sync.rate
 ---@field name string name of the limit
----@field limit number limit is events per second
+---@field rps number limit is events per second
 ---@field burst number burst is maximum number of tokens in limiter
 ---@field tokens number current tokens in the limiter
 ---@field last_ts number last timestamp when limiter was updated with tokens
 ---@field last_event number last timestamp of rate-limited event
-local limit = {}
+local rate = {}
 
-limit.__index = limit
-limit.__tostring = function (self) return "limit<".. (self.name or 'anon') ..">" end
-setmetatable(limit, { __call = function (_, name) return _.new(name) end })
+rate.__index = rate
+rate.__tostring = function (self)
+    return ("limit<%s [%.1f/%s:%0.1f/s]>"):format(
+        self.name or 'anon',
+        self.tokens or 0, self.burst or 0, self.rps or 0
+    )
+end
+setmetatable(rate, { __call = function (_, name, ...) return _.new(name, ...) end })
 
----@class sync.limit.reservation
----@field lim sync.limit
+---@class sync.rate.reservation
+---@field lim sync.rate
 ---@field tokens number
 ---@field timeToAct number
 local reservation_mt = {}
 reservation_mt.__index = reservation_mt
 
 ---Cancels reservation. This means that requestor will not perform action under this reservation
----@param timestamp number timestamp (default=now())
+---@param timestamp number? timestamp (default=now())
 function reservation_mt:cancel(timestamp)
     timestamp = tonumber(timestamp) or fiber.time()
 
     local lim = self.lim
 
     -- limiter is infinite
-    if lim.limit == math.huge then return end
+    if lim.rps == math.huge then return end
 
     -- no tokens to return
     if self.tokens == 0 then return end
@@ -36,7 +41,7 @@ function reservation_mt:cancel(timestamp)
     -- time of action already passed (nothing can be returned)
     if self.timeToAct < timestamp then return end
 
-    local restore = self.tokens - (lim.last_event - self.timeToAct) * lim.limit
+    local restore = self.tokens - (lim.last_event - self.timeToAct) * lim.rps
     if restore <= 0 then return end
 
     local tokens
@@ -58,40 +63,40 @@ end
 
 ---Creates new limit
 ---@param name string? name of the limit
----@param lim number float limit per second
+---@param rps number float limit per second
 ---@param burst integer? allowed burst (default=0)
----@return sync.limit
-function limit.new(name, lim, burst)
-	if name == limit then error("Usage: limit.new([name]) or limit([name]) (not limit:new())", 2) end
-    lim = tonumber(lim) or 0
+---@return sync.rate
+function rate.new(name, rps, burst)
+    if name == rate then error("Usage: rate.new([name]) or limit([name]) (not limit:new())", 2) end
+    rps = tonumber(rps) or 0
     burst = math.floor(tonumber(burst) or 0)
 
-    if lim < 0 then error("Usage: limit.new([name], limit, burst) limit must be non negative", 2) end
-    if burst < 0 then error("Usage: limit.new([name], limit, burst) burst must be non negative", 2) end
+    if rps < 0 then error("Usage: rate.new([name], rps, burst) rps must be non negative", 2) end
+    if burst < 0 then error("Usage: rate.new([name], rps, burst) burst must be non negative", 2) end
 
-	return setmetatable({
-		name    = name;
-        limit   = lim;
+    return setmetatable({
+        name    = name;
+        rps     = rps;
         burst   = burst or 0;
         tokens  = burst or 0;
         last_ts = 0;
         last_event = 0;
-	}, limit)
+    }, rate)
 end
 
 ---Calucalates number of tokens which will be available at time `t`
 ---@local
 ---@param timestamp number
-function limit:_advance(timestamp)
+function rate:_advance(timestamp)
     timestamp = assert(tonumber(timestamp))
 
     local elapsed = math.max(0, timestamp - self.last_ts)
 
     local delta
-    if self.limit <= 0 then
+    if self.rps <= 0 then
         delta = 0
     else
-        delta = self.limit * elapsed
+        delta = self.rps * elapsed
     end
 
     return timestamp, math.min(self.burst, self.tokens + delta)
@@ -102,12 +107,12 @@ end
 ---Can return `math.huge` is limit is non-positive
 ---@param tokens number
 ---@return number duration
-function limit:_durationFromTokens(tokens)
-    if self.limit <= 0 then
+function rate:_durationFromTokens(tokens)
+    if self.rps <= 0 then
         return math.huge
     end
 
-    return tokens / self.limit
+    return tokens / self.rps
 end
 
 ---Reserves and advances limiter for requested tokens
@@ -115,21 +120,15 @@ end
 ---@param time number
 ---@param n number
 ---@param wait number
----@return boolean|sync.limit.reservation reservation, string? error_message
-function limit:_reserve(time, n, wait)
-    if self.limit == math.huge then
+---@return boolean|sync.rate.reservation reservation, any? error_or_time_to_act
+function rate:_reserve(time, n, wait)
+    if self.rps == math.huge then
         return true
     end
-    if self.limit == 0 then
+    if self.rps == 0 then
         if self.burst >= n then
             self.burst = self.burst - n
-            local r = setmetatable({
-                ok = true,
-                lim = self,
-                tokens = self.burst,
-                timeToAct = time,
-            }, reservation_mt)
-            return r
+            return true
         end
         return false, "not enough burst"
     end
@@ -153,18 +152,13 @@ function limit:_reserve(time, n, wait)
         return false, "would exceed given timeout"
     end
 
-    local r = setmetatable({
-        lim = self,
-        tokens = n,
-        timeToAct = time+waitDuration,
-    }, reservation_mt)
-
+    local timeToAct = time+waitDuration
     -- update state
     self.last_ts = time
     self.tokens = tokens
-    self.last_event = r.timeToAct
+    self.last_event = timeToAct
 
-    return r
+    return true, timeToAct
 end
 
 ---Awaits limit until `n` events allowed within given timeout (default timeout=infinity)
@@ -190,23 +184,29 @@ end
 ---@param timeout number? timeout to wait
 ---@param n number?
 ---@return boolean success, string? error_message # true in case event was awaited, false otherwise
-function limit:wait(timeout, n)
+function rate:wait(timeout, n)
+    if getmetatable(self) ~= rate then
+        error("Usage: rate:wait() (not rate.wait())", 2)
+    end
+
     timeout = tonumber(timeout) or math.huge
     n = tonumber(n) or 1
 
-    if n > self.burst and self.limit ~= math.huge then
+    if n > self.burst and self.rps ~= math.huge then
         return false, ("limit:wait(timeout=%s, n=%s) exceeds limiters burst=%s"):format(timeout, n, self.burst)
     end
 
     local now = fiber.time()
     local waitLim = math.min(timeout, math.huge)
 
-    local r, err = self:_reserve(now, n, waitLim)
-    if not r then
+    local ok, ret = self:_reserve(now, n, waitLim)
+    if not ok then
+        local err = ret
         return false, ("limit:wait(timeout=%s, n=%s) %s"):format(timeout, n, err)
     end
 
-    local delay = math.max(0, r.timeToAct - now)
+    local timeToAct = ret
+    local delay = math.max(0, timeToAct - now)
     if delay > 0 then
         fiber.sleep(delay)
     end
@@ -220,12 +220,17 @@ end
 ---@param timestamp number? timestamp in seconds (default=now())
 ---@param n number? number of events required (default=1)
 ---@return boolean allowed, string? error_message
-function limit:allow(timestamp, n)
+function rate:allow(timestamp, n)
+    if getmetatable(self) ~= rate then
+        error("Usage: rate:allow() (not rate.allow())", 2)
+    end
+
     timestamp = tonumber(timestamp) or fiber.time()
     n = tonumber(n) or 1
 
-    local r, err = self:_reserve(timestamp, n, 0)
-    if not r then
+    local ok, ret = self:_reserve(timestamp, n, 0)
+    if not ok then
+        local err = ret
         return false, err
     end
     return true
@@ -234,13 +239,30 @@ end
 ---Reserves `n` tokens at time `timestamp`
 ---@param timestamp number? timestamp in seconds (default=now())
 ---@param n? number number of events to be reserved (default=1)
----@return sync.limit.reservation|false, string? error_message
-function limit:reserve(timestamp, n)
+---@return sync.rate.reservation|false, string? error_message
+function rate:reserve(timestamp, n)
+    if getmetatable(self) ~= rate then
+        error("Usage: rate:reserve() (not rate.reserve())", 2)
+    end
+
     timestamp = tonumber(timestamp) or fiber.time()
     n = tonumber(n) or 1
 
-    return self:_reserve(timestamp, n, math.huge)
+    local ok, ret = self:_reserve(timestamp, n, math.huge)
+    if not ok then
+        local err = ret
+        return false, err
+    end
+
+    local timeToAct = ret
+
+    local r = setmetatable({
+        lim = self,
+        tokens = n,
+        timeToAct = timeToAct,
+    }, reservation_mt)
+
+    return r
 end
 
-
-return limit
+return rate
