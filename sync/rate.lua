@@ -11,7 +11,7 @@ local rate = {}
 
 rate.__index = rate
 rate.__tostring = function (self)
-    return ("limit<%s [%.1f/%s:%0.1f/s]>"):format(
+    return ("rate<%s [%.1f/%s:%0.1f/s]>"):format(
         self.name or 'anon',
         self.tokens or 0, self.burst or 0, self.rps or 0
     )
@@ -61,18 +61,18 @@ function reservation_mt:cancel(timestamp)
 end
 
 
----Creates new limit
----@param name string? name of the limit
+---Creates new ratelimit
+---@param name string? name of the ratelimit
 ---@param rps number float limit per second
 ---@param burst integer? allowed burst (default=0)
 ---@return sync.rate
 function rate.new(name, rps, burst)
-    if name == rate then error("Usage: rate.new([name]) or limit([name]) (not limit:new())", 2) end
+    if name == rate then error("Usage: rate.new(name, [rps, burst]) or rate(name, [rps, burst]) (not rate:new(...))", 2) end
     rps = tonumber(rps) or 0
     burst = math.floor(tonumber(burst) or 0)
 
-    if rps < 0 then error("Usage: rate.new([name], rps, burst) rps must be non negative", 2) end
-    if burst < 0 then error("Usage: rate.new([name], rps, burst) burst must be non negative", 2) end
+    if rps < 0 then error("Usage: rate.new(name, [rps, burst]) rps must be non negative", 2) end
+    if burst < 0 then error("Usage: rate.new(name, [rps, burst]) burst must be non negative", 2) end
 
     return setmetatable({
         name    = name;
@@ -104,7 +104,7 @@ end
 
 ---Returns duration in fractinal seconds from token
 ---
----Can return `math.huge` is limit is non-positive
+---Can return `math.huge` if limit is non-positive
 ---@param tokens number
 ---@return number duration
 function rate:_durationFromTokens(tokens)
@@ -161,25 +161,25 @@ function rate:_reserve(time, n, wait)
     return true, timeToAct
 end
 
----Awaits limit until `n` events allowed within given timeout (default timeout=infinity)
+---Awaits rate until `n` events allowed within given timeout (default timeout=infinity)
 ---
 ---Can return instant `false` when required tokens can't be awaited in given `timeout`
 ---
 ---**Usage:**
 ---
 ---    -- wait for single event infinitely
----    assert(limit:wait())
+---    assert(rate:wait())
 ---
 ---    -- await instant token (noyield)
----    if limit:wait(0) then
+---    if rate:wait(0) then
 ---        -- ratelimit granted
 ---    end
 ---
 ---    -- await 1 token within 100ms
----    assert(limit:wait(0.1))
+---    assert(rate:wait(0.1))
 ---
 ---    -- await 2 tokens within 100ms
----    assert(limit:wait(0.1, 2))
+---    assert(rate:wait(0.1, 2))
 ---@async
 ---@param timeout number? timeout to wait
 ---@param n number?
@@ -193,7 +193,7 @@ function rate:wait(timeout, n)
     n = tonumber(n) or 1
 
     if n > self.burst and self.rps ~= math.huge then
-        return false, ("limit:wait(timeout=%s, n=%s) exceeds limiters burst=%s"):format(timeout, n, self.burst)
+        return false, ("rate:wait(timeout=%s, n=%s) exceeds limiters burst=%s"):format(timeout, n, self.burst)
     end
 
     local now = fiber.time()
@@ -202,7 +202,7 @@ function rate:wait(timeout, n)
     local ok, ret = self:_reserve(now, n, waitLim)
     if not ok then
         local err = ret
-        return false, ("limit:wait(timeout=%s, n=%s) %s"):format(timeout, n, err)
+        return false, ("rate:wait(timeout=%s, n=%s) %s"):format(timeout, n, err)
     end
 
     local timeToAct = ret

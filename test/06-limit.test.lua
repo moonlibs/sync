@@ -68,7 +68,7 @@ test:deadline(function()
 	test:noyield(function ()
 		local ok, err = rate:wait(0.1)
 		test:is(ok, false, "second token can't be available in 100ms (with rps=3)")
-		test:is(err, "limit:wait(timeout=0.1, n=1) would exceed given timeout", "error message is correct")
+		test:is(err, "rate:wait(timeout=0.1, n=1) would exceed given timeout", "error message is correct")
 	end)
 
 	local s = fiber.time()
@@ -83,7 +83,7 @@ test:deadline(function()
 	test:noyield(function()
 		local ok, err = rate:wait(nil, 3) -- request more than burst
 		test:is(ok, false, "can't be taken more than burst tokens")
-		test:is(err, "limit:wait(timeout=inf, n=3) exceeds limiters burst=1", "correct error message")
+		test:is(err, "rate:wait(timeout=inf, n=3) exceeds limiters burst=1", "correct error message")
 	end)
 
 	test:noyield(function()
