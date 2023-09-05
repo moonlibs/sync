@@ -112,7 +112,7 @@ test:deadline(function()
 
 		test:ok(almost_gt(reserv.timeToAct, fiber.time()+1/rate.rps, 0.01), "timeToAct ≥ now+1/rps")
 		test:ok(almost_gt(fiber.time()+2/rate.rps, reserv.timeToAct, 0.01), "timeToAct ≤ now+2/rps")
-		reserv:cancel() -- cancell reservation
+		reserv:cancel() -- cancel reservation
 
 		reserv = rate:reserve()
 		assert(reserv)
@@ -141,6 +141,9 @@ test:deadline(function()
 	test:noyield(function()
 		for _ = 1, 5 do
 			test:ok(rate:allow(), "infinite rate almost allows")
+		end
+		for _ = 1, 5 do
+			test:ok(rate:wait(), "infinite rate never waits")
 		end
 	end)
 

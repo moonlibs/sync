@@ -123,12 +123,12 @@ end
 ---@return boolean|sync.rate.reservation reservation, any? error_or_time_to_act
 function rate:_reserve(time, n, wait)
     if self.rps == math.huge then
-        return true
+        return true, time
     end
     if self.rps == 0 then
         if self.burst >= n then
             self.burst = self.burst - n
-            return true
+            return true, time
         end
         return false, "not enough burst"
     end
