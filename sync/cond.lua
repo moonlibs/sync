@@ -52,6 +52,9 @@ function cond:recv(timeout)
 	if not self.lock then
 		self.lock = fiber.cond()
 	end
+	if timeout == 0 then
+		return nil, "Timed out"
+	end
 	self.lock:wait(timeout or self.timeout)
 	self.lock = nil
 	if self.sent then
