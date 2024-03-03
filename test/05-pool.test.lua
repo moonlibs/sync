@@ -60,7 +60,7 @@ test:deadline(function()
 	print("pool:send returned")
 
 	local ft2 = fiber.time()
-	test:ok(ft2 > ft1, "send yields fiber")
+	test:is(ft2, ft1, "send does not yield fiber when worker is available")
 	test:ok(not t1_done, 'task still wasnt processed')
 
 	test:ok(not pool:wait(0), 'pool has accepted given task')
