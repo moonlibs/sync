@@ -63,4 +63,24 @@ test:deadline(function()
 
 end, 3, 'recv -> send works')
 
+test:deadline(function()
+	local cond = sync.cond()
+	local value = math.random()
+
+	test:noyield(function()
+		local no_val, err = cond:recv(0)
+		test:is(no_val, nil, 'empty cond returns no value')
+		test:is(err, 'Timed out', 'error message is timed out')
+	end)
+
+	cond:send(value)
+
+	test:noyield(function()
+		local recv, err = cond:recv(0)
+		test:is(recv, value, 'value received')
+		test:is(err, nil, 'no error returned')
+	end)
+
+end, 1, 'recv noyields when timeout=0')
+
 test:done_testing()

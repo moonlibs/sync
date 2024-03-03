@@ -60,7 +60,7 @@ test:deadline(function()
 	print("pool:send returned")
 
 	local ft2 = fiber.time()
-	test:ok(ft2 > ft1, "send yields fiber")
+	test:is(ft2, ft1, "send does not yield fiber when worker is available")
 	test:ok(not t1_done, 'task still wasnt processed')
 
 	test:ok(not pool:wait(0), 'pool has accepted given task')
@@ -352,5 +352,38 @@ test:deadline(function()
 	test:is(res2, "task was cancelled", "second wait must return task was cancelled")
 	test:is(waited, 0, "task:wait on cancelled task must return instantly")
 end, 1, "task autocancelled when wait_timeout is too low")
+
+test:deadline(function()
+	local pool = sync.pool.new('pool', 1)
+
+	local executed
+	local task, err
+
+	test:noyield(function()
+		task, err = pool:send(function() executed = true end, {},
+			{ async = true, wait_timeout = 0 })
+		test:is(err, nil, "pool with one worker raises no error on send{wait_timeout=0}")
+	end)
+
+	---@cast task sync.pool.task
+	task:wait()
+	test:is(executed, true, "task was successfully executed")
+
+	-- pool still has free slot
+	test:noyield(function ()
+		task, err = pool:send(function() fiber.yield() executed = true end, {},
+			{ async = true, wait_timeout = 0 })
+
+		test:is(err, nil, "pool with one worker raises no error on send{wait_timeout=0}")
+
+		task, err = pool:send(function() executed = true end, {},
+			{ async = true, wait_timeout = 0 })
+
+		test:is(err, pool.errors.TASK_WAS_NOT_SCHEDULED, "second task was not scheduled")
+	end)
+
+	pool:terminate()
+	pool:wait()
+end, 1, "pool:send allows put with timeout=0")
 
 test:done_testing()

@@ -362,11 +362,16 @@ function pool:send(func, args, opts)
 
 	self.wg:start()
 
-	while not self.terminate_cb:recv(0) and fiber.time() < deadline do
-		fiber.testcancel()
-		if self.chan:put(task, math.min(1, deadline - fiber.time())) then
-			task.published_at = fiber.time()
-			break
+	if fiber.time() <= deadline then
+		while not self.terminate_cb:recv(0) do
+			fiber.testcancel()
+			if self.chan:put(task, math.min(1, math.max(0, deadline - fiber.time()))) then
+				task.published_at = fiber.time()
+				break
+			end
+			if fiber.time() >= deadline then
+				break
+			end
 		end
 	end
 
